@@ -1,0 +1,228 @@
+The image you provided is a flowchart of MikroTik's packet processing path through the firewall — an essential guide for creating rules across the **RAW**, **Mangle**, **Filter**, and **NAT** tables. 
+Based on this flow, I’ll provide a sample of key **MikroTik firewall rules** for each chain shown in the image:
+
+---
+
+## 🔁 **1. PREROUTING Chain**
+
+### 🔸 RAW (Before Conn. Tracking)
+
+```bash
+/ip firewall raw add chain=prerouting src-address=192.168.88.0/24 action=drop comment="Drop early unwanted traffic"
+```
+
+### 🔸 MANGLE PREROUTING (After Conn. Tracking)
+
+```bash
+/ip firewall mangle add chain=prerouting protocol=tcp dst-port=80,443 action=mark-packet new-packet-mark=web_traffic passthrough=yes comment="Mark web traffic"
+```
+
+### 🔸 DST-NAT
+
+```bash
+/ip firewall nat add chain=dstnat protocol=tcp dst-port=80 action=dst-nat to-addresses=192.168.88.100 to-ports=8080 comment="Redirect HTTP traffic to internal server"
+```
+
+---
+
+## 🧭 **2. INPUT Chain (Traffic to Router Itself)**
+
+### 🔸 MANGLE INPUT
+
+```bash
+/ip firewall mangle add chain=input action=mark-connection new-connection-mark=router_access passthrough=yes comment="Mark router access"
+```
+
+### 🔸 FILTER INPUT
+
+```bash
+/ip firewall filter add chain=input protocol=tcp dst-port=22 src-address-list=admin_ips action=accept comment="Allow SSH only from admins"
+/ip firewall filter add chain=input action=drop comment="Drop all other input traffic"
+```
+
+---
+
+## 🔀 **3. FORWARD Chain (Through the Router)**
+
+### 🔸 MANGLE FORWARD
+
+```bash
+/ip firewall mangle add chain=forward protocol=udp dst-port=10010,10013,20000-20002 action=mark-packet new-packet-mark=pubg_traffic passthrough=yes comment="Mark PUBG traffic"
+```
+
+### 🔸 FILTER FORWARD
+
+```bash
+/ip firewall filter add chain=forward connection-state=established,related action=accept comment="Allow established connections"
+/ip firewall filter add chain=forward connection-state=invalid action=drop comment="Drop invalid"
+/ip firewall filter add chain=forward action=drop comment="Drop the rest"
+```
+
+---
+
+## 📤 **4. OUTPUT Chain (Router-Originated Traffic)**
+
+### 🔸 MANGLE OUTPUT
+
+```bash
+/ip firewall mangle add chain=output protocol=tcp dst-port=443 action=mark-routing new-routing-mark=secure_routes comment="Route HTTPS via different WAN"
+```
+
+### 🔸 FILTER OUTPUT
+
+```bash
+/ip firewall filter add chain=output dst-port=53 protocol=udp action=accept comment="Allow router DNS requests"
+/ip firewall filter add chain=output action=drop comment="Drop other output"
+```
+
+---
+
+## 🚀 **5. POSTROUTING Chain**
+
+### 🔸 MANGLE POSTROUTING
+
+```bash
+/ip firewall mangle add chain=postrouting action=mark-routing new-routing-mark=wan1_mark comment="Mark routing for WAN1"
+```
+
+### 🔸 SRC-NAT
+
+```bash
+/ip firewall nat add chain=srcnat out-interface=ether1 action=masquerade comment="Masquerade traffic on WAN"
+```
+
+---
+
+## 📌 Optional HTB & Queue Setup (Simple View)
+
+```bash
+/queue simple add name="Game Traffic" target=192.168.88.0/24 packet-marks=pubg_traffic max-limit=5M/5M
+```
+
+---
+
+This setup aligns with the flow from your image. Let me know your goals (e.g., block, shape game traffic, dual WAN routing), and I’ll refine the rules for that purpose.
+
+
+
+
+== Advance Fireall ==
+=====================
+Here’s an **advanced MikroTik firewall + mangle + NAT + raw script** based on the full packet flow diagram you uploaded. This script includes:
+
+* 🎯 Game detection (PUBG + Free Fire)
+* 🔐 Input filtering (secured access)
+* 🚀 Multi-WAN marking (routing marks)
+* 🧠 RAW performance optimization
+* 📊 Traffic shaping with queue trees
+* 🔄 Masquerade for outbound NAT
+
+---
+
+## 🔧 **🔥 Complete MikroTik Advanced Firewall Script**
+
+> ⚠️ Customize subnets, interface names, and IPs as needed.
+
+---
+
+### 1️⃣ **RAW Rules (Early Drop & Address List)**
+
+```bash
+/ip firewall raw
+add chain=prerouting src-address-list=bad_list action=drop comment="Drop bad IPs early"
+add chain=prerouting protocol=udp dst-port=10010,10013,10096,20000-20002 action=add-src-to-address-list address-list=pubg_users address-list-timeout=1h comment="Track PUBG users"
+add chain=prerouting protocol=udp dst-port=10001,10003,10012,39003 action=add-src-to-address-list address-list=freefire_users address-list-timeout=1h comment="Track Free Fire users"
+```
+
+---
+
+### 2️⃣ **MANGLE – Packet and Routing Marks**
+
+```bash
+/ip firewall mangle
+# PUBG Traffic
+add chain=prerouting protocol=udp dst-port=10010,10013,10096,20000-20002 action=mark-packet new-packet-mark=pubg_traffic passthrough=yes comment="Mark PUBG packets"
+
+# Free Fire Traffic
+add chain=prerouting protocol=udp dst-port=10001,10003,10012,39003 action=mark-packet new-packet-mark=freefire_traffic passthrough=yes comment="Mark Free Fire packets"
+
+# Multi-WAN Routing Mark Example
+add chain=prerouting src-address=192.168.88.0/24 in-interface=LAN connection-mark=no-mark action=mark-connection new-connection-mark=wan1_conn passthrough=yes
+add chain=prerouting connection-mark=wan1_conn action=mark-routing new-routing-mark=to_wan1 passthrough=yes
+```
+
+---
+
+### 3️⃣ **NAT Rules**
+
+```bash
+/ip firewall nat
+# Masquerade for WAN1
+add chain=srcnat out-interface=WAN1 action=masquerade comment="Masquerade WAN1"
+# Masquerade for WAN2 (if dual WAN)
+add chain=srcnat out-interface=WAN2 action=masquerade comment="Masquerade WAN2"
+```
+
+---
+
+### 4️⃣ **FILTER Rules – Secure the Router**
+
+```bash
+/ip firewall filter
+# Allow LAN to Router
+add chain=input in-interface=LAN action=accept comment="Allow LAN input"
+
+# Allow Winbox/SSH from Admin IPs
+add chain=input protocol=tcp dst-port=22,8291 src-address-list=admin_ips action=accept comment="Allow SSH/Winbox from admins"
+
+# Allow Established/Related
+add chain=input connection-state=established,related action=accept comment="Allow established input"
+add chain=forward connection-state=established,related action=accept comment="Allow established forward"
+
+# Drop Everything Else
+add chain=input action=drop comment="Drop all other input"
+add chain=forward action=drop comment="Drop all other forward"
+```
+
+---
+
+### 5️⃣ **Simple Queue Example (Game Traffic Limit)**
+
+```bash
+/queue simple
+add name="Limit PUBG" target-addresses=192.168.88.0/24 packet-marks=pubg_traffic max-limit=2M/2M comment="Limit PUBG users"
+add name="Limit Free Fire" target-addresses=192.168.88.0/24 packet-marks=freefire_traffic max-limit=2M/2M comment="Limit Free Fire users"
+```
+
+---
+
+### 6️⃣ **Address Lists (Optional)**
+
+```bash
+/ip firewall address-list
+add list=admin_ips address=192.168.88.10 comment="Admin Laptop"
+add list=bad_list address=123.45.67.89 comment="Blocked IP"
+```
+
+---
+
+## 💡 Summary
+
+This script does the following:
+
+* Detects and marks PUBG and Free Fire traffic by destination port
+* Adds game users to dynamic address lists
+* Sets up advanced routing mark logic (for dual WANs or shaping)
+* Drops invalid/unknown traffic at the earliest point (raw and filter)
+* Applies queues per packet mark for bandwidth shaping
+
+---
+
+Let me know:
+
+* Your LAN IP subnet
+* WAN interfaces (`ether1`, `pppoe-out1`, etc.)
+* If you're using single or dual WAN
+* If you want to throttle, prioritize, or block game traffic
+
+I can then tailor the script exactly to your setup.
